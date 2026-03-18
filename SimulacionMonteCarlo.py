@@ -78,13 +78,14 @@ class GBM(SimulacionMonteCarlo):
             self.param_dict = param_dict
         
 
-    def simular(self):
+    def simular(self, with_jumps=False):
         if not self.confirmar_parametros_validos(self.param_dict):
             print("ERROR: parámetros inválidos. Abortando simulación.")
             return
 
         S = np.full([self.N+1, self.M], self.S0, dtype=np.dtype(float))
-        Z = np.random.standard_normal([self.N, self.M])
+        Z = np.random.standard_normal([self.N, self.M])    
+        
         for i in range(self.N):
             S[i+1,:] = S[i,:]*(1 + self.mu * self.Deltat + self.sigma * np.sqrt(self.Deltat)*Z[i, :])
         return S
@@ -120,7 +121,10 @@ class GBM(SimulacionMonteCarlo):
         return
                                
 
-
+class MertonJumpDiffusion(GBM):
+    def __init__(self, param_dict=None):
+        super().__init__(param_dict)
+        super().mostrar_parametros()
 
 
 
