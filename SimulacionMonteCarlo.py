@@ -125,12 +125,12 @@ class GBM(SimulacionMonteCarlo):
 
     def ajustar_parametros(self, ts, M = 1):
         # ajusta todos los parámetros o ninguno
-        new_params = {'T': ts.shape[0], 'N': ts.shape[0], 'Deltat':1., 'S0':ts.iloc[0], 'M':M}
+        new_params = {'T': ts.shape[0], 'N': ts.shape[0], 'Deltat':1., 'S0':ts[0], 'M':M}
         def neg_log_likelihood(p):
             var_mu, var_sigma = p
             nlL = -np.sum([np.log(1/(np.sqrt(2*np.pi*new_params['Deltat'])*var_sigma))
-                            -(ts.iloc[k]-ts.iloc[k-1]*(1+var_mu*new_params['Deltat']))**2/
-                             (2*var_sigma**2*new_params['Deltat']*ts.iloc[k-1]**2)
+                            -(ts[k]-ts[k-1]*(1+var_mu*new_params['Deltat']))**2/
+                             (2*var_sigma**2*new_params['Deltat']*ts[k-1]**2)
                            for k in range(1, ts.shape[0])])
             return nlL
 
@@ -185,9 +185,9 @@ class MertonJumpDiffusion(GBM):
 
     def simular(self, S0=None, N=None, M=None):
         S = super().simular(S0, N, M)
+
         N = np.random.poisson(size=[self.N+1, self.M], lam=self.lbda*self.Deltat)
         jumps = np.argwhere(N > 0)
-        
         for j in range(self.M):
             for i in range(self.N+1):
                 jump = N[i,j] * np.random.normal(loc=self.mu_J, scale=self.sigma_J)
@@ -221,144 +221,128 @@ class MertonJumpDiffusion(GBM):
                 log_likelihood += np.log(ksum)
             return -log_likelihood
 
-        def jac(Theta):
-            jac = np.zeros(5)
-            k_MAX = 20
-
-            mu, sigma = Theta[0], Theta[1]
-            lbda = Theta[2]
-            mu_J, sigma_J = Theta[3], Theta[4]
-
+        def merton_nll(v, K_max=20):
+            x = np.diff(np.log(ts))
+            dt = 1.
             
-            for n in range(1, new_params['N']):
-                den = 0
-                for k in range(k_MAX+1):
-                    # calcular denominador
-                    loc = ts[n-1]*(1+mu*new_params['Deltat']) + k*mu_J
-                    scale = np.sqrt(ts[n-1]**2*new_params['Deltat']*sigma**2+k*sigma_J**2)
-                    density_norm = scipy.stats.norm.pdf(x=ts[n],loc=loc,scale=scale)
-                    mass_poisson = scipy.stats.poisson.pmf(k=k, mu=lbda)
-                    den += density_norm*mass_poisson
-                
-                d_mu, d_sigma, d_lbda, d_mu_J, d_sigma_J = 0,0,0,0,0
-                for k in range(k_MAX+1):
-                    # calcular derivadas de f
-                    M = ts[n-1]*(1+mu*new_params['Deltat']) + k*mu_J
-                    Sigma = np.sqrt((ts[n-1]*sigma)**2*new_params['Deltat'] + (k*sigma_J)**2)
-                    
-                    d_mu += -np.sqrt(2)*new_params['Deltat']*ts[n-1]*(new_params['Deltat']*lbda)**k*(2*M - 2*ts[n])*np.exp(-new_params['Deltat']*lbda)*np.exp(-(-M + ts[n])**2/(2*Sigma**2))/(4*np.sqrt(np.pi)*Sigma**3*scipy.special.factorial(k))
-
-
-                    d_sigma += new_params['Deltat']*ts[n-1]**2*sigma*(-np.sqrt(2)*(new_params['Deltat']*lbda)**k*np.exp(-new_params['Deltat']*lbda)*np.exp(-(-M + ts[n])**2/(2*Sigma**2))/(2*np.sqrt(np.pi)*Sigma**2*scipy.special.factorial(k)) + np.sqrt(2)*(new_params['Deltat']*lbda)**k*(-M + ts[n])**2*np.exp(-new_params['Deltat']*lbda)*np.exp(-(-M + ts[n])**2/(2*Sigma**2))/(2*np.sqrt(np.pi)*Sigma**4*scipy.special.factorial(k)))/np.sqrt(new_params['Deltat']*ts[n-1]**2*sigma**2 + k*sigma_J**2)
-
-                    d_lbda += -np.sqrt(2)*new_params['Deltat']*(new_params['Deltat']*lbda)**k*np.exp(-new_params['Deltat']*lbda)*np.exp(-(-M + ts[n])**2/(2*Sigma**2))/(2*np.sqrt(np.pi)*Sigma*scipy.special.factorial(k)) + np.sqrt(2)*k*(new_params['Deltat']*lbda)**k*np.exp(-new_params['Deltat']*lbda)*np.exp(-(-M + ts[n])**2/(2*Sigma**2))/(2*np.sqrt(np.pi)*Sigma*lbda*scipy.special.factorial(k))
-
-                    d_mu_J += -np.sqrt(2)*k*(new_params['Deltat']*lbda)**k*(2*M - 2*ts[n])*np.exp(-new_params['Deltat']*lbda)*np.exp(-(-M + ts[n])**2/(2*Sigma**2))/(4*np.sqrt(np.pi)*Sigma**3*scipy.special.factorial(k))
-
-
-                    d_sigma_J += k*sigma_J*(-np.sqrt(2)*(new_params['Deltat']*lbda)**k*np.exp(-new_params['Deltat']*lbda)*np.exp(-(-M + ts[n])**2/(2*Sigma**2))/(2*np.sqrt(np.pi)*Sigma**2*scipy.special.factorial(k)) + np.sqrt(2)*(new_params['Deltat']*lbda)**k*(-M + ts[n])**2*np.exp(-new_params['Deltat']*lbda)*np.exp(-(-M + ts[n])**2/(2*Sigma**2))/(2*np.sqrt(np.pi)*Sigma**4*scipy.special.factorial(k)))/np.sqrt(new_params['Deltat']*ts[n-1]**2*sigma**2 + k*sigma_J**2)
-
-                    
-                jac += np.array([d_mu,d_sigma,d_lbda,d_mu_J,d_sigma_J])/den
-            return -jac
+            mu0       = v[0]
+            sigma     = np.exp(v[1])
+            lam       = np.exp(v[2])
+            mu_j      = v[3]
+            sigma_j   = np.exp(v[4])
+        
+            ks        = np.arange(K_max + 1)
+            means     = mu0 * dt + ks * mu_j
+            vars_     = sigma**2 * dt + ks * sigma_j**2
+            log_pois  = scipy.stats.poisson.logpmf(ks, lam * dt)
+            log_gauss = scipy.stats.norm.logpdf(x[:, None], means, np.sqrt(vars_))
+            log_w     = log_pois[None, :] + log_gauss
+        
+            # log-sum-exp
+            a   = log_w.max(axis=1, keepdims=True)
+            ll  = (a.squeeze() + np.log(np.exp(log_w - a).sum(axis=1))).sum()
+            return -ll
 
         def EM():
-            Theta_0 = np.ones(5)
-            Theta_l = np.ones(5)
+            def safe_em_step(S, dt, Theta, K_max=40):
+                x   = np.log(ts[1:] / ts[:-1])
+                N   = len(x)
+                mu0 = Theta[0]
+                sigma, sigma_j = Theta[1], Theta[4]
+                lam, mu_j      = Theta[2], Theta[3]
             
-            def E(Theta):
-                k_MAX = 1
+                ks = np.arange(K_max + 1)
+            
+                # --- E-step (log space) ---
+                means     = mu0 * dt + ks * mu_j                      # (K+1,)
+                vars_     = sigma**2 * dt + ks * sigma_j**2           # (K+1,)
                 
-                mu, sigma = Theta[0], Theta[1]
-                lbda = Theta[2]
-                mu_J, sigma_J = Theta[3], Theta[4]
+                # Guard: variance must be positive
+                vars_     = np.maximum(vars_, 1e-12)
+            
+                log_gauss   = scipy.stats.norm.logpdf(x[:, None], means, np.sqrt(vars_))  # (N, K+1)
+                log_poisson = scipy.stats.poisson.logpmf(ks, lam * dt)                    # (K+1,)
+                log_w       = log_gauss + log_poisson[None, :]                 # (N, K+1)
+            
+                # log-sum-exp normalization
+                a   = log_w.max(axis=1, keepdims=True)
+                w   = np.exp(log_w - a)
+                row_sums = w.sum(axis=1, keepdims=True)
+            
+                # Guard: if a row is all zeros something is very wrong
+                if np.any(row_sums == 0):
+                    raise ValueError("All weights zero for at least one observation. "
+                                     "Check initialization and K_max.")
+                w /= row_sums
 
-                mu_l, sigma_l = Theta_l[0], Theta_l[1]
-                lbda_l = Theta_l[2]
-                mu_J_l, sigma_J_l = Theta_l[3], Theta_l[4]
+                
 
-                Q = 0
-                for n in range(1, new_params['N']):
-                    ksum = 0
-                    for k in range(0, k_MAX+1):
-                        
-                        den = 0
-                        # usamos parámetros de paso l para calcular q (parametros _l)
-                        for kp in range(0, k_MAX+1):
-                            loc = ts[n-1]*(1+mu_l*new_params['Deltat']) + kp*mu_J_l
-                            scale = np.sqrt(ts[n-1]**2*new_params['Deltat']*sigma_l**2+kp*sigma_J_l**2)
-                            density_norm = scipy.stats.norm.pdf(x=ts[n],loc=loc,scale=scale)
-                            mass_poisson = scipy.stats.poisson.pmf(k=kp, mu=lbda)
-                            den += density_norm*mass_poisson
-                            
-                        loc = ts[n-1]*(1+mu_l*new_params['Deltat']) + k*mu_J_l
-                        scale = np.sqrt(ts[n-1]**2*new_params['Deltat']*sigma_l**2+k*sigma_J_l**2)
-                        density_norm = scipy.stats.norm.pdf(x=ts[n],loc=loc,scale=scale)
-                        mass_poisson = scipy.stats.poisson.pmf(k=k, mu=lbda)
-                        q = density_norm*mass_poisson/den
-
-                        # calculamos el valor de log(...)
-                        loc = ts[n-1]*(1+mu*new_params['Deltat']) + k*mu_J
-                        scale = np.sqrt(ts[n-1]**2*new_params['Deltat']*sigma**2+k*sigma_J**2)
-                        density_norm = scipy.stats.norm.pdf(x=ts[n],loc=loc,scale=scale)
-                        mass_poisson = scipy.stats.poisson.pmf(k=k, mu=lbda)
-                        argument_log = density_norm*mass_poisson
-
-                        ksum += q*np.log(argument_log)
-    
-                    Q += ksum
-                return Q
-
-            def M(Theta_0):
-                def callback(Theta):
-                    print(f"mu:\t\t{Theta[0]}")
-                    print(f"sigma:\t\t{Theta[1]}")
-                    print(f"lambda:\t\t{Theta[2]}")
-                    print(f"mu_J:\t\t{Theta[3]}")
-                    print(f"sigma_J:\t{Theta[4]}")
-                    print("")
-
-                bounds = [(-np.inf, np.inf), (0, np.inf), (0, np.inf), (-np.inf, np.inf), (0, np.inf)]
-
-                print("Primera optimización...:")
-                opt_res = scipy.optimize.minimize(lambda x: -E(x), Theta_0, method='L-BFGS-B',bounds=bounds,
-                                                  options={'disp':True},callback=callback)
-                if not opt_res.success:
-                    print("ERROR: EM: no se ha podido optimizar en el paso M.")
-                    return
-                Theta_l = Theta_0
-                Theta_new = opt_res.x
-                print(Theta_new)
-                while np.sum((Theta_new-Theta_l)**2)>0.1:
-                    Theta_l = Theta_new
-                    opt_res = scipy.optimize.minimize(lambda x: -E(x), Theta_l, method='L-BFGS-B',bounds=bounds,
-                                                  options={'disp':True},callback=callback)
-                    Theta_new = opt_res.x
+                
+                # --- Sufficient statistics ---
+                A = w.sum()                          # = N
+                B = (w * ks).sum()
+                C = (w * ks**2).sum()
+                D = (w * x[:, None]).sum()
+                E = (w * ks * x[:, None]).sum()
+            
+                # --- M-step: joint mu0, mu_j ---
+                det = A * C - B**2
+                if abs(det) < 1e-10:
+                    mu0_new  = D / (A * dt)
+                    mu_j_new = mu_j                  # fallback: keep current
+                else:
+                    mu0_new  = (C * D - B * E) / (det * dt)
+                    mu_j_new = (A * E - B * D) / det
+            
+                # --- M-step: lambda ---
+                lam_new = np.clip((w * ks).sum() / (N * dt), 0.01, 200.0)
+            
+                # --- M-step: sigma_j ---
+                resid    = x[:, None] - mu0_new * dt - ks * mu_j_new
+                denom_j  = (w * ks**2).sum()
+                sigma_j2 = (w * ks * resid**2).sum() / denom_j if denom_j > 1e-10 else sigma_j**2
+            
+                # --- M-step: sigma ---
+                sigma2 = ((w * resid**2).sum() - sigma_j2 * (w * ks).sum()) / (N * dt)
+            
+                # Clamp variances
+                sigma2   = max(sigma2,   0.002)
+                sigma_j2 = max(sigma_j2, 1e-8)
+                lam_new = max(lam_new, 1.)
+            
+                # --- Drift recovery ---
+                k_bar   = np.exp(mu_j_new + 0.5 * sigma_j2) - 1
+                mu_new  = mu0_new + 0.5 * sigma2 + lam_new * k_bar
+            
+                # --- NaN guard ---
+                #new_params = dict(mu=mu_new, mu0=mu0_new, sigma=np.sqrt(sigma2),
+                #                  lam=lam_new, mu_j=mu_j_new, sigma_j=np.sqrt(sigma_j2))
+                Theta_new = [mu_new, np.sqrt(sigma2), lam_new, mu_j_new, np.sqrt(sigma_j2)]
+            
                 return Theta_new
+            
 
-            return M(Theta_0);
 
-        return EM()
+            return Theta
+
+        r = np.diff(np.log(ts))
+        mu = np.mean(r)
+        sigma = 0.05971123130259934
+        lbda = 0.001
+        mu_J = 50.
+        sigma_J = 200.
+        Theta = np.array([mu, sigma, lbda, mu_J, sigma_J])
         
+        opt_res = scipy.optimize.minimize(merton_nll, Theta,  method='L-BFGS-B')
+        Theta = opt_res.x
+        new_params['mu'] = Theta[0]
+        new_params['sigma'] = np.exp(Theta[1])
+        new_params['lambda'] = np.exp(Theta[2])
+        new_params['mu_J'] = Theta[3]
+        new_params['sigma_J'] = np.exp(Theta[4])
+        self.informar_parametros(new_params)    
         
-
-        bounds = [(-np.inf, np.inf), (0, np.inf), (0, np.inf), (-np.inf, np.inf), (0, np.inf)]
-        
-        opt_res = scipy.optimize.minimize(neg_log_likelihood, 5*np.ones(5), method='L-BFGS-B',
-                                          callback=callback, jac=jac,bounds=bounds,
-                                          options={'disp': True}, )
-
-        if opt_res.success:
-            print("Ajuste de parámetros realizado correctamente.")
-            new_params['mu'] = opt_res.x[0]
-            new_params['sigma'] = opt_res.x[1]
-            new_params['lambda'] = opt_res.x[2]
-            new_params['mu_J'] = opt_res.x[3]
-            new_params['sigma_J'] = opt_res.x[4]
-            self.informar_parametros(new_params)
-        else:
-            print("ERROR: no se han ajustado los parámetros correctamente.")
-
+        return Theta
             
                     
         
