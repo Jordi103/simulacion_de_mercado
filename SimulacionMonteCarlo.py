@@ -113,6 +113,7 @@ class GBM(SimulacionMonteCarlo):
         
 
     def mostrar_parametros(self):
+        print("===== Parámetros del modelo =====")
         for var in self.param_dict.keys():
             k = len(var)//8 + 2
             if var == 'sigma_J':
@@ -188,15 +189,15 @@ class MertonJumpDiffusion(GBM):
 
         N = np.random.poisson(size=[self.N+1, self.M], lam=self.lbda*self.Deltat)
         jumps = np.argwhere(N > 0)
+        J = N * np.random.normal(size=N.shape, loc=self.mu_J, scale=self.sigma_J)
+        S += J.cumsum(axis=0)
         for j in range(self.M):
-            for i in range(self.N+1):
-                jump = N[i,j] * np.random.normal(loc=self.mu_J, scale=self.sigma_J)
-                if S[i,j] + jump <= 0:
-                    S[i:,j] = 0                    
+            for i in range(self.N):
+                if S[i,j] <= 0:
+                    S[i:,j] = 0
                     break
-                else:
-                    S[i:,j] += jump
         return S
+        
 
 
     def ajustar_parametros(self, ts, M):
@@ -221,7 +222,7 @@ class MertonJumpDiffusion(GBM):
                 log_likelihood += np.log(ksum)
             return -log_likelihood
 
-        def merton_nll(v, K_max=20):
+        def merton_nll(v, K_max=30):
             x = np.diff(np.log(ts))
             dt = 1.
             
@@ -342,7 +343,7 @@ class MertonJumpDiffusion(GBM):
         new_params['sigma_J'] = np.exp(Theta[4])
         self.informar_parametros(new_params)    
         
-        return Theta
+        return 
             
                     
         
