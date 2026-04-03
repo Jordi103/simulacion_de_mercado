@@ -120,8 +120,6 @@ class GBM(SimulacionMonteCarlo):
                 k -= 1
             espacio = k*"\t"
             print(f"{var}:{espacio}{self.param_dict[var]}")
-        
-        
 
 
     def ajustar_parametros(self, ts, M = 1):
@@ -148,6 +146,16 @@ class GBM(SimulacionMonteCarlo):
 
         return
 
+    def cambiar_escala_temporal(self, N=None, Deltat=None):
+        if N is None and Deltat is None:
+            print("ERROR: hay que informar almenos un parámetro de cambio de escala.")
+            return False
+        if N * Deltat != self.T:
+            print("WARNING: se está cambiando el plazo temporal de la simulación.")
+            self.param_dict['T'] = N * Deltat
+        self.param_dict['N'] = N
+        self.param_dict['Deltat'] = Deltat
+        self.informar_parametros(self.param_dict)
 
 class MertonJumpDiffusion(GBM):
     def __init__(self, param_dict=None):
