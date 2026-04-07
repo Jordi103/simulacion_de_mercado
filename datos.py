@@ -77,8 +77,6 @@ class OHLC(pd.DataFrame):
         #ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(locator))
 
 
-        
-
     def desde_simulacion(self, serie):
         # asumimos granularidad de las fechas mayor que diaria.
 
