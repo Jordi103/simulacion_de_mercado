@@ -6,6 +6,10 @@ import datetime
 from datetime import timedelta
 
 import requests
+from json import JSONDecodeError
+
+import yfinance as yf
+
 
 
 def leer_apikey():
@@ -18,14 +22,54 @@ def download_stock_data(ticker):
     endpoint = f"historical-price-eod/full?symbol={ticker}"
     apikey = "&apikey=" + leer_apikey()
     URL = base + endpoint + apikey
+
+    try:
+        data_json = requests.get(URL).json()
+    except JSONDecodeError:
+        return None
     
-    data_json = requests.get(URL)
-    data = pd.DataFrame(data_json.json())
+    data = pd.DataFrame(data_json)
     data.index = pd.to_datetime(data['date'])
     data.drop(['symbol', 'date'], axis=1, inplace=True) 
     data.sort_index(inplace=True)
 
     return data
+
+class StockDataDownloader():
+    def __init__(self, source=None, start=None, end=None):
+        self.source = source
+        self.start = start
+        self.end = end
+        if start is not None and end is not None and end < start:
+            print("WARNING: fecha final anterior a fecha inicial.")
+
+    def download(self, ticker):
+        if self.source is None:
+            print("ERROR: fuente de datos no especificada.")
+            return 
+        if self.source == 'fmp':
+            to_drop = ['change', 'changePercent', 'vwap']
+            data = download_stock_data(ticker)
+            if data is not None:
+                data = data.drop(to_drop, axis=1)
+            return data
+        if self.source in ['yahoo', 'yf', 'yfinance']:
+            data = yf.download(ticker, start=self.start, end=self.end,
+                               multi_level_index=False, progress=False)
+            data = data.sort_index()
+            data.columns = [col.lower() for col in data.columns]
+            data.index.names = ['date']
+            return data if len(data) > 0 else None
+        return 
+        
+    def download_from_any_source(self, ticker):
+        for source in ['fmp', 'yahoo']:
+            self.source = source
+            data = self.download(ticker)
+            if data is not None:
+                return data
+        return None
+
 
 
 def next_k_bdates(k, start, delta=datetime.timedelta(days=1)):
@@ -50,11 +94,9 @@ class OHLC(pd.DataFrame):
             super().__init__()
 
         
-    def plot(self, ax_new=None):
-        if ax_new is None:
+    def plot(self, ax=None):
+        if ax is None:
             fig, ax = plt.subplots(1,1, figsize=(16,6))
-        else:
-            ax = ax_new
             
         width = 0.5
         width2 = 0.1
@@ -71,16 +113,23 @@ class OHLC(pd.DataFrame):
 
         ax.grid()
 
-        ax.set_xticks(self.index)
-        locator = mdates.AutoDateLocator()
-        ax.xaxis.set_major_locator(locator)
+        #ax.set_xticks(self.index)
+        #locator = mdates.AutoDateLocator()
+        #ax.xaxis.set_major_locator(locator)
         #ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(locator))
+        fig = ax.get_figure()
+        fig.autofmt_xdate()
+        ax.xaxis.set_major_locator(mdates.AutoDateLocator())
+        # ax.xaxis.set_major_formatter(mdates.AutoDateFormatter(mdates.AutoDateLocator()))
+
+          # rotates and aligns date labels
+
 
 
     def desde_simulacion(self, serie):
         # asumimos granularidad de las fechas mayor que diaria.
 
-        df = serie.reset_index()
+        df = serie.reset_index(names='fechas')
         df['dia'] = df['fechas'].dt.floor("D")
         
         df_final = df.drop('fechas',axis=1).groupby('dia')
@@ -100,14 +149,15 @@ class OHLC(pd.DataFrame):
         std = serie_con_fechas.rolling(5).std()/np.sqrt(5)
         
         df['close'] = serie_con_fechas
-        df['open'] = serie_con_fechas.shift(-1)
+        df['open'] = serie_con_fechas.shift(1)
         df['high'] = np.maximum(df['close'], df['open']) + np.abs(np.random.normal(scale=std))
         df['low'] = np.minimum(df['close'], df['open']) - np.abs(np.random.normal(scale=std))
         
         return OHLC(df.dropna())
 
 
-    def desde_interpolacion_puentes_brownianos(self, serie_con_fechas, n_subpasos=20):
+    def desde_interpolacion_puentes_brownianos(self, serie_con_fechas,
+                                               n_subpasos=20, retorna_interpolacion=False):
         
         df = pd.DataFrame()
         total_dias = len(pd.bdate_range(start=serie_con_fechas.index[0],
@@ -121,16 +171,16 @@ class OHLC(pd.DataFrame):
         for i in range(len(serie_con_fechas)-1):
             a = serie_con_fechas.iloc[i]
             b = serie_con_fechas.iloc[i+1]
-            T_subpasos = (serie_con_fechas.index[i+1]-serie_con_fechas.index[i]).total_seconds()/(60.*60*24)
-            # Deltat_subpasos = T_subpasos/n_subpasos
-            n_sp_total = int(T_subpasos/Deltat_subpasos)
-            B = np.random.normal(size=n_sp_total-1,
+            
+            T_subpasos = 1 - Deltat_subpasos
+           
+            B = np.random.normal(size=n_subpasos-1,
                                  scale=serie_con_fechas.std()*np.sqrt(Deltat_subpasos))\
                 .cumsum(axis=0)
             B = np.array([0, *B])
-            bridge_00 = B - np.arange(n_sp_total)*Deltat_subpasos/T_subpasos * B[-1]
-            bridge_ab = a + np.arange(n_sp_total)*Deltat_subpasos/T_subpasos*(b-a) + bridge_00
-            fechas_ab = next_k_bdates(k=n_sp_total,
+            bridge_00 = B - np.arange(n_subpasos)*Deltat_subpasos/T_subpasos * B[-1]
+            bridge_ab = a + np.arange(n_subpasos)*Deltat_subpasos/T_subpasos*(b-a) + bridge_00
+            fechas_ab = next_k_bdates(k=n_subpasos,
                                       start=serie_con_fechas.index[i],
                                       delta=timedelta(days=Deltat_subpasos))
                 
@@ -138,9 +188,10 @@ class OHLC(pd.DataFrame):
 
         df.dropna(inplace=True)
 
-        # serie_con_fechas.reset_index(drop=True).plot()
-        # df.reset_index(drop=True).plot()
-        return self.desde_simulacion(df['valores'], df.index)
+        if retorna_interpolacion:
+            return df
+        
+        return self.desde_simulacion(df)
 
 
 
