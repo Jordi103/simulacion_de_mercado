@@ -13,8 +13,8 @@ import yfinance as yf
 
 
 def leer_apikey():
-    with open("apikey.txt") as f:
-        API = f.read()[:-1]
+    with open("apikey_fmp.txt") as f:
+        API = f.read()
     return API
 
 def download_stock_data(ticker):
@@ -43,19 +43,62 @@ class StockDataDownloader():
         if start is not None and end is not None and end < start:
             print("WARNING: fecha final anterior a fecha inicial.")
 
+    def read_apikey(self):
+        if self.source == None:
+            return None
+        filename = 'apikey_' + self.source + '.txt'
+        with open(filename) as f:
+            API = f.read()
+        return API
+        
+        
     def download(self, ticker):
         if self.source is None:
             print("ERROR: fuente de datos no especificada.")
             return 
+            
         if self.source == 'fmp':
             to_drop = ['change', 'changePercent', 'vwap']
-            data = download_stock_data(ticker)
+            
+            base = "https://financialmodelingprep.com/stable/"
+            endpoint = f"historical-price-eod/full?symbol={ticker}"
+            apikey = "&apikey=" + self.read_apikey()
+            URL = base + endpoint + apikey
+        
+            try:
+                data_json = requests.get(URL).json()
+            except JSONDecodeError:
+                return None
+            
+            data = pd.DataFrame(data_json)
+            data.index = pd.to_datetime(data['date'])
+            data.drop(['symbol', 'date'], axis=1, inplace=True) 
+            data.sort_index(inplace=True)
             if data is not None:
                 data = data.drop(to_drop, axis=1)
             return data
+            
+        if self.source == 'eodhd':
+            base = 'https://eodhd.com/api/eod/'
+            apikey = '?api_token=' + self.read_apikey() + '&fmt=json'
+            URL = base + ticker + apikey
+
+            try:
+                data_json = requests.get(URL).json()
+            except JSONDecodeError:
+                return None
+
+            data = pd.DataFrame(data_json)
+            data.index = pd.to_datetime(data['date'])
+            data.drop(['adjusted_close', 'date'], axis=1, inplace=True) 
+            data.sort_index(inplace=True)
+            return data
+
+                
+        
         if self.source in ['yahoo', 'yf', 'yfinance']:
             data = yf.download(ticker, start=self.start, end=self.end,
-                               multi_level_index=False, progress=False)
+                               multi_level_index=False, progress=False);
             data = data.sort_index()
             data.columns = [col.lower() for col in data.columns]
             data.index.names = ['date']
@@ -63,12 +106,14 @@ class StockDataDownloader():
         return 
         
     def download_from_any_source(self, ticker):
-        for source in ['fmp', 'yahoo']:
+        for source in ['fmp', 'eodhd', 'yahoo']:
             self.source = source
             data = self.download(ticker)
             if data is not None:
+                print(f"Datos de {ticker} descargados de {self.source}.")
                 return data
-        return None
+        print(f"Ticker {ticker} no encontrado.")
+        return 
 
 
 
