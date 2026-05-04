@@ -338,8 +338,8 @@ class MertonJumpDiffusion(GBM):
         mu = np.mean(r)
         sigma = 0.05971123130259934
         lbda = 0.001
-        mu_J = 50.
-        sigma_J = 200.
+        mu_J = 10.
+        sigma_J = 10.
         Theta = np.array([mu, sigma, lbda, mu_J, sigma_J])
         
         opt_res = scipy.optimize.minimize(merton_nll, Theta,  method='L-BFGS-B')
